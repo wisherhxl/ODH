@@ -25,23 +25,16 @@ class general_Makenotes {
         console.log("yes");
         this.word = word;
 
+        let promises = [this.makeNotes(word)];
         var pattern = new RegExp("[\u4E00-\u9FA5]+");
         if (pattern.test(this.word)) {
-            let zdicResult = await this.findZdic(word);
-            if( zdicResult.length > 0 ){
-                return zdicResult;
-            } 
+            promises = [this.findZdic(word), this.makeNotes(word)];
         } else {
-            let promises = [this.findCambridge(word), this.findYoudao(word)];
-            if(promises.length > 0) {
-                let results = await Promise.all(promises);
-                return [].concat(...results).filter(x => x);
-            }
+            promises = [this.findCambridge(word), this.findYoudao(word)];
         }
 
-        // let deflection = api.deinflect(word);
-        let note_result = await Promise.all([this.makeNotes(word)]);
-        return [].concat(...note_result).filter(x => x);
+        let results = await Promise.all(promises);
+        return [].concat(...results).filter(x => x);
     }
 
     async makeNotes(word) {
@@ -70,7 +63,7 @@ class general_Makenotes {
             else
                 return node.innerText.trim();
         }
-        
+
         let doc = '';
         try {
             let url = `https://www.zdic.net/hans/${encodeURIComponent(word)}`;
@@ -81,16 +74,111 @@ class general_Makenotes {
             return [];
         }
 
-        let jbjs = doc.querySelector('.jbjs') || ''; // basic explaination
-        //let xxjsContent = doc.querySelector('.res_c_center') || '';
-        if (jbjs) {
-            this.removeTags(jbjs,'.zib-title'); 
-            this.removeTags(jbjs,'.h2_entry'); 
-            this.removeTags(jbjs,'.am-default.contentslot');
-            return jbjs.innerHTML;
-        } else {
-            return [];
+        let gycds = doc.querySelectorAll('.gycd') || [];
+        for (const gycd of gycds) {
+            let pz = gycd.querySelector('.pz') || '';
+            if (!pz) continue;
+
+            let rts = pz.querySelectorAll('rt') || [];
+            if (rts.length <= 0) continue;
+
+            let reading = '';
+
+            var pattern2 = new RegExp("[A-Za-z]+");
+            let pinyin = '';
+            for (const rt of rts) {
+                pinyin = T(rt);
+                if (pattern2.test(pinyin)) {
+                    reading += pinyin;
+                }
+            }
+
+            let expression = word;
+            let definitions = [];
+
+            let gycdBlocks = gycd.querySelectorAll('.def') || [];
+            for(const gycdBlock of gycdBlocks) {
+                let definition = '';
+
+                let gc_sys = gycdBlock.querySelectorAll('.gc_sy') || [];
+                for(const gc_sy of gc_sys) {
+                    definition += T(gc_sy).replace(RegExp(expression, 'gi'),`~`);
+                }
+
+                definition = `<span class="tran">${definition}</span>`;
+
+                let gc_yys = gycdBlock.querySelectorAll('.gc_yy, .gc_lz') || [];
+
+                if(gc_yys.length > 0){
+                    definition += '<ul class="sents">';
+                    for(const gc_yy of gc_yys) {
+                        let sent = T(gc_yy).replace(RegExp(expression, 'gi'),`<b>${expression}</b>`);
+                        definition += `<li class='sent'>${sent}</li>`;
+                    }
+                    definition += '</ul>';
+                }
+
+                definitions.push(definition);
+            }
+
+
+
+            let css2 = this.renderCSS();
+            notes.push({
+                css2,
+                expression: expression,
+                reading: reading,
+                definitions: definitions
+            });
         }
+
+        let jnr = doc.querySelector('.jnr') || '';
+        if (jnr) {
+            this.removeTags(jnr, '.enbox');
+            this.removeTags(jnr, '.div copyright');
+
+            let nextDicpy = jnr.querySelector('.dicpy') || '';
+
+            while (nextDicpy) {
+                let expression = word;
+                let reading = T(nextDicpy);
+                let definitions = [];
+
+                let par = nextDicpy.parentNode;
+                let pre = par.previousElementSibling || '';
+                while (pre) {
+                    pre.remove();
+                    pre = par.previousElementSibling || '';
+                }
+                par.remove();
+
+                let def = jnr.querySelector('p, ol') || '';
+                let defblocks = def.querySelectorAll('li') || '';
+                if (defblocks.length > 0) {
+                    for (const defblock of defblocks) {
+                        let trans = T(defblock);
+                        let definition = `<span class="tran">${trans}</span>`;
+                        definitions.push(definition);
+                    }
+                } else {
+                    let trans = T(def);
+                    let definition = `<span class="tran">${trans}</span>`;
+                    definitions.push(definition);
+                }
+
+                let css = this.renderCSS();
+                notes.push({
+                    css,
+                    expression: expression,
+                    reading: reading,
+                    definitions: definitions
+                });
+
+                def.remove();
+                nextDicpy = jnr.querySelector('.dicpy') || '';
+            }
+        }
+        return notes;
     }
 
     async findCambridge(word) {
@@ -159,7 +247,7 @@ class general_Makenotes {
                         let chn_tran = T(defblock.querySelector('.def-body .trans'));
                         if (!eng_tran) continue;
                         let definition = '';
-                        eng_tran = `<span class='eng_tran'>${eng_tran.replace(RegExp(expression, 'gi'),`<b>${expression}</b>`)}</span>`;
+                        eng_tran = `<span class='eng_tran'>${eng_tran.replace(RegExp(expression, 'gi'), `<b>${expression}</b>`)}</span>`;
                         chn_tran = `<span class='chn_tran'>${chn_tran}</span>`;
                         let tran = `<span class='tran'>${eng_tran}${chn_tran}</span>`;
                         definition += phrasehead ? `${phrasehead}${tran}` : `${pos}${tran}`;
@@ -172,7 +260,7 @@ class general_Makenotes {
                                 if (index > this.maxexample - 1) break; // to control only 2 example sentence.
                                 let eng_examp = T(examp.querySelector('.eg'));
                                 let chn_examp = T(examp.querySelector('.trans'));
-                                definition += `<li class='sent'><span class='eng_sent'>${eng_examp.replace(RegExp(expression, 'gi'),`<b>${expression}</b>`)}</span><span class='chn_sent'>${chn_examp}</span></li>`;
+                                definition += `<li class='sent'><span class='eng_sent'>${eng_examp.replace(RegExp(expression, 'gi'), `<b>${expression}</b>`)}</span><span class='chn_sent'>${chn_examp}</span></li>`;
                             }
                             definition += '</ul>';
                         }
@@ -231,15 +319,15 @@ class general_Makenotes {
             audios[1] = `https://dict.youdao.com/dictvoice?audio=${encodeURIComponent(expression)}&type=2`;
 
             let definition = '<ul class="ec">';
-            for (const defNode of defNodes){
+            for (const defNode of defNodes) {
                 let pos = '';
                 let def = T(defNode);
                 let match = /(^.+?\.)\s/gi.exec(def);
-                if (match && match.length > 1){
+                if (match && match.length > 1) {
                     pos = match[1];
                     def = def.replace(pos, '');
                 }
-                pos = pos ? `<span class="pos simple">${pos}</span>`:'';
+                pos = pos ? `<span class="pos simple">${pos}</span>` : '';
                 definition += `<li class="ec">${pos}<span class="ec_chn">${def}</span></li>`;
             }
             definition += '</ul>';
