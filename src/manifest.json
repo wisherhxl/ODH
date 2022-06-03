@@ -4,6 +4,11 @@
     "version": "0.9.3",
     "default_locale": "en",
     "description": "__MSG_appDesc__",
+	"browser_specific_settings": {
+      "gecko": {
+        "id": "wisherhxl@live.com"
+      }
+    },
     "icons": {
         "16": "img/icon16.png",
         "48": "img/icon48.png",
